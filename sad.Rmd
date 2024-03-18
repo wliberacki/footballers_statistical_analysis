@@ -1,0 +1,172 @@
+---
+title: 'Badanie statystyk ofensywnych najskuteczniejszych piłkarzy w sezonie 2022/23
+  w top 5 ligach Europejskich '
+author: "Wojciech Liberacki"
+date: "2023-12-15"
+output:
+  html_document: default
+  word_document: default
+  pdf_document: default
+---
+# 1 . Dane 
+Dane przedstawiają statystyki 35 piłkarzy z największą liczbą bramek zdobytych w najlepszych pięciu ligach Europejskich (angielskiej, hiszpańskiej, włoskiej, niemieckiej i francuskiej) w sezonie 2022/23
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r paged.print=TRUE}
+topscorers <- read.csv("C:/Users/wojte/OneDrive/Desktop/Projekty/Statystyczna_analiza_danych/topscorers.csv")
+```
+```{r message=FALSE, paged.print=TRUE}
+topscorers$PKmiss<- topscorers$PK-topscorers$PKatt
+topscorers$GlsPer90Min <- topscorers$Gls/(topscorers$Min/90)
+topscorers$Min <- NULL
+topscorers$Ast <- NULL
+topscorers$PK <- NULL
+topscorers$PKatt <- NULL
+topscorers
+```
+## Zmienne:
+ •	Gls: bramki zdobyte <br>
+ •	G.Sh: bramki zdobyte / ilość oddanych strzałów<br>
+ •	G.xG: bramki zdobyte - expected Goals(statystyka określająca bramki oczekiwane)<br>
+ •  Dist: średnia odległość oddawanego strzału<br>
+ •  PKmiss: rzuty karne niestrzelone (np. -1 - jeden karny niestrzelony)<br>
+ •  GlsPer90Min: bramki zdobyte na 90 minut piłkarza na boisku<br>
+
+# 2 . Charakterystyka zmiennych
+## Statystyki opisowe
+```{r}
+summary(topscorers)
+```
+## Współczynniki zmienności
+```{r}
+coefficient_of_variation<- function(x) {
+  cv <- sd(x) / abs(mean(x))
+  return(cv)
+}
+cvs <- sapply(topscorers[,-1], coefficient_of_variation)
+cvs
+```
+Współczynniki zmiennośći dla każdej zmiennej są większe od 0.1, więc nie ma tu problemu w kontekście analizy skupień.
+```{r message=FALSE}
+library(corrplot)
+cor_matrix <- cor(topscorers[,-1])
+corrplot(cor_matrix, method = "number")
+```
+<br>Dla wszystkich par zmiennych korelacja na moduł mniejsza niż 0.9, więc nie ma powodu do odrzucenia do analizy skupień.
+
+# 3. Cel projektu
+
+Celem projektu jest analiza najlepiej strzelających zawodników top 5 lig piłkarskich, stworzenie rankingu najlepszych napastników (i graczy ofensywnych) w oparciu o statystyki definiujące jakość piłkarza i jego umiejętność strzelania bramek. Analiza ma też na celu wyłonić grupę "nieoczywistych" zawodników z predyzpozycjami na stanowienie samej czołówki ogólnej klasyfikacji strzelców(zawodnicy skuteczni z niekoniecznie najwyższą ilością bramek).
+
+# 4. Porządkowanie liniowe
+
+## Metoda Hellwiga z rangami
+
+1. Wszystkie zmienne są stumulantami dlatego je standaryzuje
+```{r}
+
+topscorers_scaled <- topscorers
+
+variables_to_standardize <- c("Gls", "G.Sh", "G.xG", "SoT.", "Dist", "PKmiss", "GlsPer90Min")
+
+topscorers_scaled[, variables_to_standardize] <- scale(topscorers_scaled[, variables_to_standardize])
+
+```
+
+2. Wartość maksymalna z każdej kolumny
+```{r}
+pattern <- apply(topscorers_scaled[,2:8],2,max)
+pattern
+```
+3. Odległości obiektów od wzorca(uwzględniono rangi):<br>
+Gls - 0.125<br>
+G.Sh - 0.25<br>
+G.xG - 0.3<br>
+SoT - 0.025<br>
+Dist - 0.025<br>
+PKmiss - 0.1<br>
+GlsPer90Min - 0.175<br>
+
+```{r warning=FALSE}
+wages <- c(0.125,0.25,0.25,0.05,0.05,0.1,0.1,0.175)
+distances <- apply(topscorers_scaled[,2:8], 1,  function(row) {sqrt(sum(wages*(row-pattern)^2))})
+distances
+```
+4. Odległość "możliwie daleka"
+```{r warning=FALSE}
+max_dist <- mean(distances) + 2*sd(distances)
+max_dist 
+```
+5. Obliczone współczynniki:
+```{r}
+hellwig <- c(1- distances/max_dist)
+result<- data.frame(topscorers[,1], hellwig)
+names(result) <- c("name","hellwig")
+result[order(result$hellwig, decreasing = TRUE), ]
+```
+
+## Interpretacja
+
+Bez zaskoczenia Erling Haaland okazał się najlepszym napastnikiem. Jednak analiza przyniosła porządany efekt, pokazała ona dużo większą jakość strzelecką takich zawodników jak Wahi (miejsce w rankingu: 13 -> 3) czy Dia ( 20 - > 7) i niższą niż ta na pierwszy rzut oka widoczna, takich zawodników jak Lewandowski (7 - > 15).
+
+# 5. Analiza skupień
+
+## Odleglosci miedzy obiektami(metoda Euklidesowa):
+```{r message=FALSE}
+library(clusterSim)
+data_distances <- dist(topscorers_scaled[,2:8], method = "euclidean")
+```
+
+## Metoda Warda
+```{r}
+data_groups <- hclust(data_distances, method ="ward.D")
+data_groups
+```
+
+## Dendogram
+```{r}
+dendogram <-plot(data_groups, labels = topscorers[,1], xlab="Footballers", hang = -1)
+```
+
+### Sprawdzam, która liczba grup (2 lub 3) jest bardziej opytymalna przy pomocy indeksów:
+
+## Silhouette
+```{r}
+index.S(data_distances, cutree(data_groups, k=2))
+index.S(data_distances, cutree(data_groups, k=3))
+```
+## Huberta i Levine’a
+```{r}
+index.G3(data_distances, cutree(data_groups, k=2))
+index.G3(data_distances, cutree(data_groups, k=3))
+```
+## Bakera i Huberta
+```{r}
+index.G2(data_distances, cutree(data_groups, k=2))
+index.G2(data_distances, cutree(data_groups, k=3))
+```
+Każdy z indeksów "sugeruje" podział na 3 grupy.
+
+# Interpretacja
+```{r}
+g1<- data.frame(topscorers[c(28,26,30,27,32,34,18,21,24,22),])
+g2 <- data.frame(topscorers[c(31,33,9,18,6,7,15,11,17,25,29,23,10,12,16,8,14),])  
+g3 <- data.frame(topscorers[c(13,20,1,3,4,2,5), ])
+```
+
+Grupa nr.1 - Grupa z zawodnikami, którzy mają najmniej bramek w porównaniu do innych grup, ale są bardzo skuteczni (średnia G.xG = 3.04, dla gr. 2 = 0.35)
+```{r}
+g1
+summary(g1[,2:8])
+```
+Grupa nr.2 - Grupa zawodników strzelających średnio więcej bramek niż w grupie 1, ale nieskutecznych (najniższe G.xG, i PKmiss)
+```{r}
+g2
+summary(g2[,2:8])
+```
+Grupa nr.3 - Grupa zawodników strzelających najwięcej bramek, najskuteczniejszych i stwarzających największe zagrożenie 
+```{r}
+g3
+summary(g3[,2:8])
+```
